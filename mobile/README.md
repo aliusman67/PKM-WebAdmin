@@ -1,13 +1,14 @@
-# Mobile — Aplikasi Ujian (Flutter, Android)
+# Mobile — Aplikasi Ujian Siswa (Flutter, Android)
 
-Proyek Flutter untuk **dua aplikasi Android** (bukan iOS):
+Proyek Flutter untuk **satu aplikasi Android: ujian siswa** (bukan iOS).
 
-| Aplikasi | Application ID | Flavor |
-|---|---|---|
-| Siswa | `id.smpn5tangerang.ujian_siswa` | `siswa` |
-| Pengawas | `id.smpn5tangerang.ujian_pengawas` | `pengawas` |
+| Aplikasi | Application ID |
+|---|---|
+| Siswa | `id.smpn5tangerang.ujian_siswa` |
 
-Satu codebase, dua product flavor. Rilis ke **Google Play Store** via **fastlane + GitHub Actions** (internal → closed testing → production).
+> **Pengawas & admin tidak punya aplikasi mobile** — pemantauan ujian, laporan, dan notifikasi dilakukan lewat **dashboard web** (`/dashboard`, real-time via SSE). Mobile = siswa saja.
+
+Rilis ke **Google Play Store** via **fastlane + GitHub Actions** (internal → closed testing → production).
 
 Ringkasan tech stack & konteks proyek: [`../CLAUDE.md`](../CLAUDE.md), [`../README.md`](../README.md).
 
@@ -31,7 +32,7 @@ flutter doctor   # pastikan toolchain Android siap
 Dari **root repo**:
 
 ```bash
-flutter create --org id.smpn5tangerang --project-name ujian_mobile --platforms android mobile
+flutter create --org id.smpn5tangerang --project-name ujian_siswa --platforms android mobile
 cd mobile
 ```
 
@@ -57,9 +58,6 @@ dependencies:
   # Keamanan
   flutter_secure_storage: ^9.0.0     # token JWT
   device_info_plus: ^10.1.0          # device binding
-  # Notifikasi (pengawas)
-  firebase_core: ^3.0.0
-  firebase_messaging: ^14.7.0
   # Observability
   sentry_flutter: ^8.0.0
 
@@ -76,27 +74,24 @@ dev_dependencies:
     sdk: flutter
 ```
 
+> Tidak ada `firebase_core` / `firebase_messaging`: push notification dulu dipakai untuk aplikasi pengawas. Karena mobile hanya untuk siswa, pemantauan live memakai SSE/polling dari dashboard web.
+
 ```bash
 flutter pub get
 ```
 
 ## 4. Konfigurasi Android
 
-### 4.1 Flavor (`android/app/build.gradle.kts`)
+### 4.1 Application ID (`android/app/build.gradle.kts`)
+
+Satu aplikasi, jadi **tidak perlu product flavor** — environment diatur via `--dart-define` (bagian 5).
 
 ```kotlin
 android {
-    defaultConfig { minSdk = 21 }
-    flavorDimensions += "app"
-    productFlavors {
-        create("siswa") {
-            dimension = "app"
-            applicationId = "id.smpn5tangerang.ujian_siswa"
-        }
-        create("pengawas") {
-            dimension = "app"
-            applicationId = "id.smpn5tangerang.ujian_pengawas"
-        }
+    namespace = "id.smpn5tangerang.ujian_siswa"
+    defaultConfig {
+        applicationId = "id.smpn5tangerang.ujian_siswa"
+        minSdk = 21
     }
 }
 ```
@@ -108,17 +103,13 @@ android {
 ```xml
 <!-- android/app/src/main/AndroidManifest.xml -->
 <uses-permission android:name="android.permission.INTERNET"/>
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-<!-- TIDAK ada akses lokasi/kamera kecuali fitur proktor memang membutuhkannya -->
+<!-- Tanpa POST_NOTIFICATIONS (tidak ada FCM).
+     TIDAK ada akses lokasi/kamera kecuali fitur proktor memang membutuhkannya -->
 ```
 
-### 4.3 Firebase (khusus pengawas — FCM)
+### 4.3 Root detection
 
-Daftarkan **dua** aplikasi Firebase sesuai application ID flavor. Unduh `google-services.json` dari Firebase Console → taruh di `android/app/src/<flavor>/` (siswa tanpa FCM boleh kosong). Tambahkan plugin `com.google.gms.google-services` di `android/build.gradle.kts` dan aplikasi plugin di `android/app/build.gradle.kts`.
-
-### 4.4 Root detection (aplikasi siswa)
-
-Deteksi root di build siswa untuk menolak perangkat berisiko — gunakan `root_checker`, dikombinasikan dengan `device_info_plus` untuk device binding dan evaluasi risiko di server.
+Deteksi root untuk menolak perangkat berisiko — gunakan `root_checker`, dikombinasikan dengan `device_info_plus` untuk device binding dan evaluasi risiko di server.
 
 ## 5. Environment via `--dart-define`
 
@@ -130,11 +121,7 @@ Buat file config (satu per env, **tidak commit secret**):
 ```
 
 ```bash
-flutter run --flavor siswa -t lib/main_siswa.dart \
-  --dart-define-from-file=env/dev.json
-
-flutter run --flavor pengawas -t lib/main_pengawas.dart \
-  --dart-define-from-file=env/staging.json
+flutter run -t lib/main.dart --dart-define-from-file=env/dev.json
 ```
 
 Env: `dev` / `staging` / `prod`. Baca dengan `String.fromEnvironment`.
@@ -150,18 +137,16 @@ dart run build_runner watch --delete-conflicting-outputs   # saat develop
 
 ```
 mobile/
-├── android/
-│   └── app/src/{siswa,pengawas}/     # manifest & google-services per flavor
+├── android/                          # satu build config (tanpa flavor)
 ├── env/                              # dev.json, staging.json, prod.json
 ├── lib/
-│   ├── main_siswa.dart
-│   ├── main_pengawas.dart
+│   ├── main.dart                     # entry point aplikasi siswa
 │   ├── app/            # router (go_router), tema, bootstrap Riverpod
 │   ├── core/
 │   │   ├── api/        # dio + interceptor (auth refresh, HMAC X-Signature/X-Nonce/X-Timestamp, retry)
 │   │   ├── db/         # drift: local store + sync job queue (server-wins)
 │   │   └── security/   # secure storage, device binding, root detection
-│   ├── features/       # ujian_siswa, pemantauan_pengawas, laporan, notifikasi
+│   ├── features/       # ujian_siswa, proktor, sinkronisasi_offline
 │   └── shared/         # widgets, utils
 └── test/  integration_test/
 ```
@@ -181,14 +166,10 @@ flutter analyze
 Play Store **wajib AAB** (`appbundle`), bukan APK.
 
 ```bash
-# Siswa — production
-flutter build appbundle --release --flavor siswa   -t lib/main_siswa.dart   --dart-define-from-file=env/prod.json
-
-# Pengawas — production
-flutter build appbundle --release --flavor pengawas -t lib/main_pengawas.dart --dart-define-from-file=env/prod.json
+flutter build appbundle --release -t lib/main.dart --dart-define-from-file=env/prod.json
 ```
 
-Output: `build/app/outputs/bundle/<flavor>Release/app-<flavor>-release.aab`.
+Output: `build/app/outputs/bundle/release/app-release.aab`.
 
 ## 10. Signing (Play App Signing + keystore release)
 
@@ -219,47 +200,40 @@ Kita pakai **Play App Signing** (Google pegang App Signing Key; kita pegang **Up
 
 ## 11. Alur rilis (fastlane + GitHub Actions)
 
-Tahap wajib per aplikasi:
+Satu aplikasi, satu lane. Tahap wajib:
 
 ```
 internal (1–2 hari uji)  →  closed testing (≥12 tester aktif selama 14 hari)  →  production
 ```
 
-- **Closed testing** untuk aplikasi baru harus lolos review akses Play: sediakan **≥12 tester email list** (guru/pengawas tetap) dan biarkan aktif 14 hari.
+- **Closed testing** untuk aplikasi baru harus lolos review akses Play: sediakan **≥12 tester email list** (sebaiknya campuran guru/pengawas + perwakilan perangkat siswa yang dipakai ujian) dan biarkan aktif 14 hari.
 - Setelan **testing track** harus memuat info privasi & deskripsi uji.
 
 Struktur fastlane:
 
 ```yaml
-# mobile/fastlane/Appfile — per aplikasi (dua Play Console app)
+# mobile/fastlane/Appfile — satu Play Console app
 android_package_name: "id.smpn5tangerang.ujian_siswa"
 
 # mobile/fastlane/Snapfile / metadata/
 metadata/
-  android/siswa/en-US/, android/siswa/id-ID/
-  android/pengawas/en-US/, android/pengawas/id-ID/
+  android/en-US/
+  android/id-ID/
 ```
 
 ```ruby
 # mobile/fastlane/Fastfile
 platforms :android do
-  desc "Rilis aplikasi siswa"
-  lane :siswa do |options|
-    gradle(task: "bundle", build_flavor: "siswa", build_type: "release")
+  desc "Build AAB aplikasi siswa & upload ke Google Play"
+  lane :rilis do |options|
+    sh("flutter", "pub", "get")
+    sh("dart", "run", "build_runner", "build", "--delete-conflicting-outputs")
+    sh("flutter", "build", "appbundle", "--release",
+       "-t", "lib/main.dart", "--dart-define-from-file=env/prod.json")
     upload_to_play_store(
       track: options[:track] || "internal",   # internal | closed | production
-      aab: "build/app/outputs/bundle/siswaRelease/app-siswa-release.aab",
-      metadata_path: "fastlane/metadata/android/siswa"
-    )
-  end
-
-  desc "Rilis aplikasi pengawas"
-  lane :pengawas do |options|
-    gradle(task: "bundle", build_flavor: "pengawas", build_type: "release")
-    upload_to_play_store(
-      track: options[:track] || "internal",
-      aab: "build/app/outputs/bundle/pengawasRelease/app-pengawas-release.aab",
-      metadata_path: "fastlane/metadata/android/pengawas"
+      aab: "build/app/outputs/bundle/release/app-release.aab",
+      metadata_path: "fastlane/metadata/android"
     )
   end
 end
@@ -272,7 +246,6 @@ GitHub Actions (ringkas):
 on:
   workflow_dispatch:
     inputs:
-      app:   { type: choice, options: [siswa, pengawas] }
       track: { type: choice, options: [internal, closed, production] }
 jobs:
   release:
@@ -281,7 +254,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4      # JDK 17
       - uses: subosito/flutter-action@v2 # Flutter stable
-      - run: cd mobile && flutter pub get && dart run build_runner build --delete-conflicting-outputs
       - name: Pasang keystore & kredensial (dari secrets)
         run: |
           echo "${{ secrets.UPLOAD_KEYSTORE_B64 }}" | base64 -d > webmin-upload-keystore.p12
@@ -293,21 +265,21 @@ jobs:
       - name: Build & upload ke Play
         env:
           SUPPLY_JSON_KEY_DATA: "${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}"
-        run: cd mobile && fastlane android ${{ inputs.app }} track:${{ inputs.track }}
+        run: cd mobile && fastlane android rilis track:${{ inputs.track }}
 ```
 
 Secrets CI: `UPLOAD_KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `PLAY_SERVICE_ACCOUNT_JSON` (service account Play Console, role *Release manager*).
 
 ## 12. Kepatuhan Play Store (sebelum submit)
 
-- [ ] **Privacy policy** (URL publik) untuk kedua aplikasi — wajib, meskipun data hanya disimpan di sekolah.
-- [ ] **Data safety form** diisi akurat: data siswa (identitas, jawaban ujian, bukti pelanggaran) → jelaskan pengumpulan, tujuan, retensi; tandai *not shared* kecuali ke processor (Sentry/Firebase).
-- [ ] **Permission minimal**: hanya INTERNET (+ POST_NOTIFICATIONS untuk pengawas). Location/kamera hanya jika fitur proktor aktif — jika tidak, hapus dari manifest.
-- [ ] **Account sekolah (G Suite)** untuk Play Console; satu developer account untuk kedua aplikasi.
+- [ ] **Privacy policy** (URL publik) — wajib, meskipun data hanya disimpan di sekolah.
+- [ ] **Data safety form** diisi akurat: data siswa (identitas, jawaban ujian, bukti pelanggaran) → jelaskan pengumpulan, tujuan, retensi; tandai *not shared* kecuali ke processor (Sentry). Tanpa Firebase, daftar processor lebih pendek.
+- [ ] **Permission minimal**: hanya `INTERNET`. Tidak ada `POST_NOTIFICATIONS`, location, atau kamera kecuali fitur proktor aktif — jika tidak, hapus dari manifest.
+- [ ] **Account sekolah (G Suite)** untuk Play Console.
 - [ ] **Target API level** mengikuti kebijakan Play terbaru saat submit (naikkan targetSdk tiap tahun kebijakan berubah).
 - [ ] **AAB** (`flutter build appbundle`), bukan APK.
 - [ ] Halaman Play: screenshot (≥2), deskripsi id-ID, kategori *Education*, kontak dukungan.
-- [ ] Aplikasi siswa: konten sesuai usia anak (Data Safety + family policy bila ditargetkan ke anak — perhatikan *Designed for Families*).
+- [ ] Konten sesuai usia anak — perhatikan status **Designed for Families** (target pengguna siswa SMP).
 
 ## 13. Troubleshooting rilis
 

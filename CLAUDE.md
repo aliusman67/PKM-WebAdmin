@@ -1,6 +1,6 @@
 # CLAUDE.md — Monitoring Ujian SMPN 5 Tangerang
 
-Sistem monitoring ujian (ANBK-style): dashboard admin/pengawas web + aplikasi mobile siswa & pengawas. Real-time, anti-kecurangan (rate limit, anti-replay), dan tahan jaringan tidak stabil (offline-first mobile).
+Sistem monitoring ujian (ANBK-style): dashboard admin/pengawas web + aplikasi mobile khusus siswa (pengawas tidak punya aplikasi mobile). Real-time, anti-kecurangan (rate limit, anti-replay), dan tahan jaringan tidak stabil (offline-first mobile).
 
 ## Tech stack
 
@@ -19,26 +19,26 @@ Sistem monitoring ujian (ANBK-style): dashboard admin/pengawas web + aplikasi mo
 - **PostgreSQL 16** — basis data utama
 - **Prisma 6** — ORM (`prisma/schema.prisma`, migrasi di `prisma/migrations/`)
 - **Redis 7** — cache, rate limit, anti-replay (nonce), pub/sub SSE, antrian job (opsional; fallback in-memory bila `REDIS_URL` kosong)
-- **BullMQ** — background job (rekap nilai, generate PDF laporan, kirim notifikasi)
+- **BullMQ** — background job (rekap nilai, generate PDF laporan, kirim notifikasi ke dashboard web — bukan push)
 - **Penyimpanan file**: MinIO / S3-compatible untuk bukti pelanggaran & export berkas jawaban
 - **Logging**: `pino` (structured JSON)
 
 ### Mobile — Flutter (proyek terpisah di `mobile/`)
-- **Flutter 3.x + Dart 3.x** — aplikasi siswa & pengawas (**Android-only**, bukan iOS), konsumsi API via JWT Bearer + header signature HMAC
+- **Flutter 3.x + Dart 3.x** — aplikasi **siswa saja** (**Android-only**, bukan iOS); pemantauan pengawas cukup lewat dashboard web, tidak ada aplikasi mobile pengawas. Konsumsi API via JWT Bearer + header signature HMAC
 - **State management**: Riverpod v2 (`flutter_riverpod` + `riverpod_generator`)
 - **Navigasi**: `go_router`
 - **Networking**: `dio` + interceptor (auth refresh, HMAC signature, retry exponential backoff)
 - **Model & serialisasi**: `freezed` + `json_serializable` (codegen `build_runner`)
 - **Offline-first** (krusial — jaringan sekolah tidak stabil): `drift` (SQLite) sebagai local store + job queue sinkronisasi; auto-sync saat koneksi pulih, conflict resolution server-wins
 - **Keamanan**: `flutter_secure_storage` (token JWT), `device_info_plus` (device binding), deteksi root/jailbreak untuk siswa
-- **Notifikasi**: Firebase Cloud Messaging (`firebase_messaging`) untuk pengawas
+- **Notifikasi**: tanpa push notification — Firebase/FCM **tidak dipakai** di mobile. Alert & pemantauan live pengawas hanya di dashboard web (SSE + fallback polling)
 - **Konfigurasi**: `--dart-define` untuk base URL & env (dev/staging/prod)
-- **Distribusi**: dirilis ke **Google Play Store** (aplikasi siswa & pengawas)
-  - Application ID: `id.smpn5tangerang.ujian_siswa` dan `id.smpn5tangerang.ujian_pengawas`
+- **Distribusi**: dirilis ke **Google Play Store** (satu aplikasi saja: siswa)
+  - Application ID: `id.smpn5tangerang.ujian_siswa` — tanpa product flavor
   - Signing: Play App Signing + keystore release (diimpan aman, JKS di luar repo, via secret CI)
   - Build: `flutter build appbundle --release` (AAB, wajib untuk Play); minSdk 21, targetSdk sesuai kebijakan Play terbaru
   - Rilis via **GitHub Actions + fastlane**: track internal → closed testing (perlu ≥12 tester aktif 14 hari untuk persetujuan akses Play) → production
-  - Kepatuhan Play: permission minimalsaja (tidak ada akses lokasi/kamera kecuali fitur proktor), privacy policy & data safety form wajib diisi, akun sekolah (G Suite) untuk Play Console
+  - Kepatuhan Play: permission minimal — hanya `INTERNET` (tanpa `POST_NOTIFICATIONS`/lokasi/kamera kecuali fitur proktor), privacy policy & data safety form wajib diisi, akun sekolah (G Suite) untuk Play Console
 
 ### Infrastruktur & DevOps
 - **Docker + docker-compose** — Postgres, Redis, MinIO, app (deployment on-premise di server sekolah)

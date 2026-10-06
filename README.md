@@ -1,11 +1,11 @@
 # WebMin — Sistem Monitoring Ujian (ANBK-style)
 
-Sistem monitoring ujian sekolah: **dashboard admin/pengawas (web)** + **aplikasi mobile Android (siswa & pengawas)**. Real-time (SSE), anti-kecurangan (rate limit, anti-replay HMAC), dan tahan jaringan tidak stabil (mobile offline-first).
+Sistem monitoring ujian sekolah: **dashboard admin & pengawas (web)** + **aplikasi mobile Android khusus siswa**. Pengawas memantau lewat web, bukan aplikasi mobile. Real-time (SSE), anti-kecurangan (rate limit, anti-replay HMAC), dan tahan jaringan tidak stabil (mobile offline-first).
 
 | Platform | Lokasi | Dokumentasi setup |
 |---|---|---|
-| Web + API (Next.js 15) | root repo (`src/`, `prisma/`) | dokumen ini |
-| Mobile Android (Flutter) | `mobile/` | [`mobile/README.md`](mobile/README.md) |
+| Web + API (Next.js 15) — admin & pengawas | root repo (`src/`, `prisma/`) | dokumen ini |
+| Mobile Android (Flutter) — siswa saja | `mobile/` | [`mobile/README.md`](mobile/README.md) |
 
 Detail lengkap tech stack & konvensi ada di [`CLAUDE.md`](CLAUDE.md).
 
@@ -80,7 +80,7 @@ npm i -D vitest @testing-library/react @testing-library/jest-dom jsdom \
 │   ├── schema.prisma
 │   └── migrations/
 ├── docker-compose.yml
-└── mobile/                     # Proyek Flutter (lihat mobile/README.md)
+└── mobile/                     # Proyek Flutter — aplikasi siswa saja (lihat mobile/README.md)
 ```
 
 ## 5. Environment variables
@@ -175,9 +175,9 @@ Aturan (lihat CLAUDE.md): migrasi yang sudah di-apply **tidak boleh diedit manua
 npm run dev        # http://localhost:3000
 ```
 
-- Dashboard: `/dashboard` (admin/pengawas)
-- API mobile: `/api/v1/*` — **wajib** header `X-Signature` (HMAC-SHA256), `X-Nonce`, `X-Timestamp` (ditolak jika selisih waktu > 30 detik)
-- SSE realtime: `/api/v1/stream` (Redis pub/sub, fallback polling 5 detik)
+- Dashboard: `/dashboard` — dipakai **admin & pengawas** (pengawas tidak punya aplikasi mobile)
+- API mobile: `/api/v1/*` — konsumen tunggalnya **aplikasi siswa**; **wajib** header `X-Signature` (HMAC-SHA256), `X-Nonce`, `X-Timestamp` (ditolak jika selisih waktu > 30 detik)
+- SSE realtime: `/api/v1/stream` (Redis pub/sub, fallback polling 5 detik) — pemantauan live pengawas di dashboard
 
 ## 10. Testing
 
@@ -187,6 +187,6 @@ npx playwright install     # sekali saja
 npm run test:e2e           # Playwright (E2E)
 ```
 
-## 11. Mobile & rilis Play Store
+## 11. Mobile (siswa) & rilis Play Store
 
-Setup aplikasi Android (Flutter), signing, dan alur rilis Google Play (internal → closed testing → production) dijelaskan di **[mobile/README.md](mobile/README.md)**.
+Satu aplikasi Android saja — **`id.smpn5tangerang.ujian_siswa`** — tanpa product flavor dan tanpa Firebase/FCM. Setup Flutter, signing, dan alur rilis Google Play (internal → closed testing → production) dijelaskan di **[mobile/README.md](mobile/README.md)**.
